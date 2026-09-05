@@ -525,10 +525,12 @@ const get = pub
 			continuityId,
 			header: {
 				backdropRef: meta.backdropRef,
+				certification: meta.certification,
 				coverRef: meta.coverRef,
 				genres: [...meta.genres],
 				lastUpdatedAt: meta.lastUpdatedAt,
 				nativeTitle: meta.nativeTitle,
+				networks: [...(meta.networks ?? [])],
 				productionStatus: meta.productionStatus,
 				runtimeMinutes: meta.runtimeMinutes,
 				span: meta.span,

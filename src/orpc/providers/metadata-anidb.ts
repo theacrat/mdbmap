@@ -66,6 +66,7 @@ interface AnimeEntry {
 	airedFrom: string | undefined;
 	airedTo: string | undefined;
 	cast: Credit[];
+	certifications: string[];
 	coverRef: string | undefined;
 	episodes: EpisodeMetadata[];
 	genres: string[];
@@ -326,6 +327,7 @@ const parseAnime = (xml: string, now: Date): AnimeEntry => {
 		airedFrom,
 		airedTo,
 		cast: normaliseCast(anime),
+		certifications: anime.attrs["restricted"] === "true" ? ["18+"] : [],
 		coverRef: imageRef(firstChild(anime, "picture")?.text ?? ""),
 		episodes: normaliseEpisodes(anime),
 		genres: normaliseGenres(anime),
@@ -363,6 +365,7 @@ const buildSnapshots = (version: number, entry: AnimeEntry): Snapshots => {
 	const core = coreSnapshotSchema.parse({
 		backdropRef: undefined,
 		cast: entry.cast,
+		certifications: entry.certifications,
 		coverRef: entry.coverRef,
 		genres: entry.genres,
 		ifYouLiked: entry.ifYouLiked,

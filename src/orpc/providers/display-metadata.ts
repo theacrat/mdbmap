@@ -4,6 +4,21 @@ import { metadataProviderFor } from "@/engine";
 import type { MetadataFetchOptions } from "./metadata-freshness.ts";
 import type { Providers, WorkMetadata } from "./types.ts";
 
+const overlayAnime = (
+	anidb: WorkMetadata,
+	tmdb: WorkMetadata,
+): WorkMetadata => ({
+	...anidb,
+	backdropRef: anidb.backdropRef ?? tmdb.backdropRef,
+	certification: anidb.certification ?? tmdb.certification,
+	genres: anidb.genres.length > 0 ? [...anidb.genres] : [...tmdb.genres],
+	networks:
+		anidb.networks === undefined || anidb.networks.length === 0
+			? tmdb.networks
+			: [...anidb.networks],
+	tagline: anidb.tagline ?? tmdb.tagline,
+});
+
 const fetchDisplayMetadata = async (
 	providers: Providers,
 	resolved: ResolveResult,
@@ -15,17 +30,20 @@ const fetchDisplayMetadata = async (
 		return kindProvider.fetchWork(resolved, options);
 	}
 	const meta = await kindProvider.fetchWork(resolved, options);
-	if (meta.genres.length > 0) {
+	const hasTmdbMember = resolved.segments.some(
+		(segment) => segment.members.tmdb !== undefined,
+	);
+	if (!hasTmdbMember) {
 		return meta;
 	}
 	try {
 		const tmdb = await providers.metadata.tmdb.fetchWork(resolved, {
-			force: false,
+			force: options.force === true,
 			refreshIfDue: false,
 			...(options.locale === undefined ? {} : { locale: options.locale }),
 			...(options.now === undefined ? {} : { now: options.now }),
 		});
-		return { ...meta, genres: [...tmdb.genres] };
+		return overlayAnime(meta, tmdb);
 	} catch {
 		return meta;
 	}

@@ -137,6 +137,7 @@ describe("anidb metadata provider", () => {
 		expect(meta.span).toBe("2022");
 		expect(meta.studios).toStrictEqual(["Wit Studio", "CloverWorks"]);
 		expect(meta.genres).toStrictEqual(["Comedy", "Action"]);
+		expect(meta.certification).toBeUndefined();
 		expect(meta.runtimeMinutes).toBe(24);
 		expect(meta.productionStatus).toBe("Finished");
 
@@ -240,5 +241,28 @@ describe("anidb metadata provider", () => {
 		});
 		expect(meta.title).toBe("SPY×FAMILY");
 		expect(meta.segments[0]?.episodes[0]?.title).toBe("ミッション1");
+	});
+
+	it("projects AniDB restricted titles as 18+", async () => {
+		const xml = cour1Xml.replace('restricted="false"', 'restricted="true"');
+		const fetchFn = vi.fn(async (): Promise<Response> => {
+			await Promise.resolve();
+			return new Response(xml);
+		});
+		const meta = await makeProvider(fetchFn).fetchWork(
+			{
+				continuityId: "continuity:restricted",
+				mediaKind: "anime",
+				segments: [
+					{
+						instalments: ["anidb:16947#1"],
+						kind: "episodic",
+						members: { anidb: COUR1_ID },
+					},
+				],
+			},
+			{ now: new Date("2026-09-05T00:00:00.000Z") },
+		);
+		expect(meta.certification).toBe("18+");
 	});
 });

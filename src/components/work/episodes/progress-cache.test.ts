@@ -40,10 +40,12 @@ const work = (): WorkView => ({
 	continuityId: CONTINUITY_ID,
 	header: {
 		backdropRef: undefined,
+		certification: undefined,
 		coverRef: undefined,
 		genres: [],
 		lastUpdatedAt: undefined,
 		nativeTitle: undefined,
+		networks: [],
 		productionStatus: undefined,
 		runtimeMinutes: undefined,
 		span: "2022",

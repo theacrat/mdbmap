@@ -35,11 +35,13 @@ interface SegmentMetadata {
 interface WorkMetadata {
 	backdropRef: string | undefined;
 	cast: readonly Credit[];
+	certification?: string | undefined;
 	coverRef: string | undefined;
 	genres: readonly string[];
 	ifYouLiked: readonly Similar[];
 	lastUpdatedAt?: string | undefined;
 	nativeTitle: string | undefined;
+	networks?: readonly string[] | undefined;
 	productionStatus: string | undefined;
 	runtimeMinutes: number | undefined;
 	segments: readonly SegmentMetadata[];

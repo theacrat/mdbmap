@@ -11,9 +11,15 @@ import type { LocalizedText } from "./metadata-locale.ts";
 import type { EpisodeMetadata } from "./types.ts";
 
 const MAX_CAST = 30;
+const MAX_CERTIFICATIONS = 8;
 const MAX_GENRES = 8;
+const MAX_NETWORKS = 8;
 const MAX_SIMILAR = 12;
 const YEAR_LENGTH = 4;
+const CERT_COUNTRY_RANK = new Map([
+	["US", 0],
+	["GB", 1],
+]);
 
 const STAFF_JOBS = new Map<string, string>([
 	["Director", "Director"],
@@ -361,22 +367,48 @@ const alternativeTitlesOf = (
 		20,
 	);
 
+const ratingsByPreference = (
+	entries: readonly {
+		country: string | undefined;
+		rating: string | undefined;
+	}[],
+): string[] => {
+	const ranked: { rank: number; rating: string }[] = [];
+	for (const entry of entries) {
+		const rating = entry.rating?.trim() ?? "";
+		if (rating === "") {
+			continue;
+		}
+		ranked.push({
+			rank:
+				CERT_COUNTRY_RANK.get(entry.country ?? "") ?? Number.MAX_SAFE_INTEGER,
+			rating,
+		});
+	}
+	return uniqueStrings(
+		ranked
+			.toSorted((left, right) => left.rank - right.rank)
+			.map((entry) => entry.rating),
+		MAX_CERTIFICATIONS,
+	);
+};
+
 const certificationsOfSeries = (series: TmdbSeries): string[] =>
-	uniqueStrings(
-		(series.content_ratings?.results ?? [])
-			.map((entry) => entry.rating ?? "")
-			.filter((rating) => rating !== ""),
-		8,
+	ratingsByPreference(
+		(series.content_ratings?.results ?? []).map((entry) => ({
+			country: entry.iso_3166_1,
+			rating: entry.rating,
+		})),
 	);
 
 const certificationsOfMovie = (movie: TmdbMovie): string[] =>
-	uniqueStrings(
+	ratingsByPreference(
 		(movie.release_dates?.results ?? []).flatMap((group) =>
-			(group.release_dates ?? [])
-				.map((entry) => entry.certification ?? "")
-				.filter((certification) => certification !== ""),
+			(group.release_dates ?? []).map((entry) => ({
+				country: group.iso_3166_1,
+				rating: entry.certification,
+			})),
 		),
-		8,
 	);
 
 interface SeasonSummary {
@@ -433,7 +465,10 @@ const buildSnapshots = (
 		ifYouLiked: normaliseSimilar(series),
 		localized: localizedOf(series.translations, { synopsis, tagline, title }),
 		nativeTitle,
-		networks: (series.networks ?? []).map((network) => network.name),
+		networks: uniqueStrings(
+			(series.networks ?? []).map((network) => network.name),
+			MAX_NETWORKS,
+		),
 		originalLanguage: series.original_language,
 		productionStatus: trimmedStatus(series.status),
 		runtimeMinutes: positiveMinutes(series.episode_run_time?.[0]),

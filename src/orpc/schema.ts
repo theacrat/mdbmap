@@ -263,10 +263,12 @@ interface SearchHit {
 
 interface WorkHeader {
 	backdropRef: string | undefined;
+	certification: string | undefined;
 	coverRef: string | undefined;
 	genres: string[];
 	lastUpdatedAt: string | undefined;
 	nativeTitle: string | undefined;
+	networks: string[];
 	productionStatus: string | undefined;
 	runtimeMinutes: number | undefined;
 	span: string;

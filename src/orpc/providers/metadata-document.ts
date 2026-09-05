@@ -148,6 +148,7 @@ const assemble = (
 	return {
 		backdropRef: core.backdropRef,
 		cast: core.cast.map((credit) => toCredit(credit)),
+		certification: core.certifications?.[0],
 		coverRef: core.coverRef,
 		genres: [...core.genres],
 		ifYouLiked: core.ifYouLiked.map((similar) => ({
@@ -156,6 +157,10 @@ const assemble = (
 			title: similar.title,
 		})),
 		nativeTitle: core.nativeTitle,
+		networks:
+			core.networks === undefined || core.networks.length === 0
+				? undefined
+				: [...core.networks],
 		productionStatus: core.productionStatus,
 		runtimeMinutes: core.runtimeMinutes,
 		segments,

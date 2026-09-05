@@ -28,6 +28,8 @@ const metaLine = (
 		header.runtimeMinutes === undefined
 			? undefined
 			: `${header.runtimeMinutes} min`;
+	const networks =
+		header.networks.length === 0 ? undefined : header.networks.join(" · ");
 	const segments = [
 		header.nativeTitle,
 		"continuity",
@@ -37,6 +39,8 @@ const metaLine = (
 		genres,
 		runtime,
 		header.productionStatus,
+		header.certification,
+		networks,
 	];
 	return segments
 		.filter((segment) => segment !== undefined && segment !== "")

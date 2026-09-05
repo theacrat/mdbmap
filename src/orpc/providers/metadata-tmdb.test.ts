@@ -57,6 +57,13 @@ const seriesJson = {
 		],
 	},
 	backdrop_path: "/backdrop.jpg",
+	content_ratings: {
+		results: [
+			{ iso_3166_1: "DE", rating: "16" },
+			{ iso_3166_1: "US", rating: "TV-MA" },
+			{ iso_3166_1: "GB", rating: "18" },
+		],
+	},
 	created_by: [{ id: 9, name: "Orig Creator" }],
 	episode_run_time: [45, 50],
 	first_air_date: "2020-04-01",
@@ -68,6 +75,7 @@ const seriesJson = {
 	],
 	last_air_date: "2021-06-30",
 	name: "Test Show",
+	networks: [{ name: "HBO" }, { name: "Sky" }],
 	original_name: "テストショー",
 	overview: "A show used for tests.",
 	poster_path: "/poster.jpg",
@@ -126,6 +134,12 @@ const movieJson = {
 		],
 	},
 	release_date: "2001-05-16",
+	release_dates: {
+		results: [
+			{ iso_3166_1: "FR", release_dates: [{ certification: "12" }] },
+			{ iso_3166_1: "US", release_dates: [{ certification: "PG-13" }] },
+		],
+	},
 	runtime: 121,
 	status: "Released",
 	title: "Test Movie",
@@ -288,6 +302,8 @@ describe("tmdb metadata provider", () => {
 		expect(meta.span).toBe("2020–2021");
 		expect(meta.studios).toStrictEqual(["Studio A", "Studio B"]);
 		expect(meta.genres).toStrictEqual(["Drama", "Comedy"]);
+		expect(meta.certification).toBe("TV-MA");
+		expect(meta.networks).toStrictEqual(["HBO", "Sky"]);
 		expect(meta.runtimeMinutes).toBe(45);
 		expect(meta.productionStatus).toBe("Returning Series");
 
@@ -354,6 +370,7 @@ describe("tmdb metadata provider", () => {
 		expect(fetchFn).toHaveBeenCalledWith(movieUrl("999"));
 		expect(meta).toMatchObject({
 			backdropRef: "tmdb:/movie-backdrop.jpg",
+			certification: "PG-13",
 			coverRef: "tmdb:/movie-poster.jpg",
 			genres: ["Action", "Science Fiction"],
 			nativeTitle: "映画",
