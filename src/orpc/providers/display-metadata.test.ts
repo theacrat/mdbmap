@@ -28,7 +28,10 @@ const film: ResolveResult = {
 	],
 };
 
-const metadata = (genres: readonly string[]): WorkMetadata => ({
+const metadata = (
+	genres: readonly string[],
+	extra: Partial<WorkMetadata> = {},
+): WorkMetadata => ({
 	backdropRef: undefined,
 	cast: [],
 	coverRef: undefined,
@@ -43,6 +46,7 @@ const metadata = (genres: readonly string[]): WorkMetadata => ({
 	studios: [],
 	synopsis: "",
 	title: "X",
+	...extra,
 });
 
 const providersFor = (
@@ -71,30 +75,107 @@ const providersFor = (
 });
 
 describe("fetchDisplayMetadata", () => {
-	it("replaces anime genres with the tmdb list", async () => {
+	it("keeps anime genres from anidb when they are present", async () => {
 		const meta = await fetchDisplayMetadata(
-			providersFor(metadata(["AniDB Tag"]), metadata(["Comedy", "Action"])),
+			providersFor(metadata(["Comedy"]), metadata(["Drama"])),
+			anime,
+		);
+		expect(meta.genres).toEqual(["Comedy"]);
+		expect(meta.runtimeMinutes).toBe(24);
+	});
+
+	it("overlays tmdb genres when anidb has none", async () => {
+		const meta = await fetchDisplayMetadata(
+			providersFor(metadata([]), metadata(["Comedy", "Action"])),
 			anime,
 		);
 		expect(meta.genres).toEqual(["Comedy", "Action"]);
 		expect(meta.runtimeMinutes).toBe(24);
 	});
 
-	it("drops anime genres when tmdb fails", async () => {
+	it("keeps anidb genres when tmdb fails", async () => {
 		const meta = await fetchDisplayMetadata(
-			providersFor(metadata(["AniDB Tag"]), new Error("tmdb down")),
+			providersFor(metadata(["Comedy"]), new Error("tmdb down")),
+			anime,
+		);
+		expect(meta.genres).toEqual(["Comedy"]);
+		expect(meta.runtimeMinutes).toBe(24);
+	});
+
+	it("drops anime genres when anidb has none and tmdb fails", async () => {
+		const meta = await fetchDisplayMetadata(
+			providersFor(metadata([]), new Error("tmdb down")),
 			anime,
 		);
 		expect(meta.genres).toEqual([]);
 		expect(meta.runtimeMinutes).toBe(24);
 	});
 
-	it("does not fall back to anidb tags when tmdb returns none", async () => {
+	it("overlays tmdb networks, certification, and backdrop when anidb has genres", async () => {
 		const meta = await fetchDisplayMetadata(
-			providersFor(metadata(["AniDB Tag"]), metadata([])),
+			providersFor(
+				metadata(["Comedy"]),
+				metadata(["Drama"], {
+					backdropRef: "tmdb:/back.jpg",
+					certification: "TV-14",
+					networks: ["TV Tokyo"],
+					tagline: "They have each other's backs.",
+				}),
+			),
 			anime,
 		);
-		expect(meta.genres).toEqual([]);
+		expect(meta.genres).toEqual(["Comedy"]);
+		expect(meta.backdropRef).toBe("tmdb:/back.jpg");
+		expect(meta.certification).toBe("TV-14");
+		expect(meta.networks).toEqual(["TV Tokyo"]);
+		expect(meta.tagline).toBe("They have each other's backs.");
+		expect(meta.runtimeMinutes).toBe(24);
+	});
+
+	it("keeps anidb certification over tmdb", async () => {
+		const meta = await fetchDisplayMetadata(
+			providersFor(
+				metadata(["Comedy"], { certification: "18+" }),
+				metadata(["Drama"], { certification: "TV-MA" }),
+			),
+			anime,
+		);
+		expect(meta.certification).toBe("18+");
+	});
+
+	it("skips tmdb overlay when the continuity has no tmdb member", async () => {
+		let tmdbCalls = 0;
+		const anidbOnly: ResolveResult = {
+			continuityId: "continuity:anidb-only",
+			mediaKind: "anime",
+			segments: [
+				{
+					instalments: ["anidb:1#1"],
+					kind: "episodic",
+					members: { anidb: "1" },
+				},
+			],
+		};
+		const providers = providersFor(
+			metadata(["Comedy"]),
+			metadata(["Drama"], { certification: "TV-MA" }),
+		);
+		const counting: Providers = {
+			...providers,
+			metadata: {
+				...providers.metadata,
+				tmdb: {
+					fetchWork: () => {
+						tmdbCalls += 1;
+						return metadata(["Drama"], { certification: "TV-MA" });
+					},
+				},
+			},
+		};
+		const meta = await fetchDisplayMetadata(counting, anidbOnly);
+		expect(meta.genres).toEqual(["Comedy"]);
+		expect(meta.certification).toBeUndefined();
+		expect(tmdbCalls).toBe(0);
 	});
 
 	it("leaves film genres on the tmdb snapshot", async () => {

@@ -2,11 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ResolveResult } from "@/engine";
 
+import { createMemoryMetadataStore } from "./metadata-store.ts";
+import type { MetadataStore } from "./metadata-store.ts";
+import { MOVIE_APPEND, TV_APPEND } from "./metadata-tmdb-parse.ts";
 import { createTmdbProvider } from "./metadata-tmdb.ts";
-import type { MetadataKv } from "./metadata-tmdb.ts";
 
 const SERIES_ID = "999";
 const MOVIE_ID = SERIES_ID;
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const movieUrl = (id: string) =>
+	`${TMDB_BASE}/movie/${id}?append_to_response=${MOVIE_APPEND}&api_key=test-key`;
+const tvUrl = (id: string) =>
+	`${TMDB_BASE}/tv/${id}?append_to_response=${TV_APPEND}&api_key=test-key`;
+const seasonUrl = (id: string, season: number) =>
+	`${TMDB_BASE}/tv/${id}/season/${season}?api_key=test-key`;
 
 const resolved: ResolveResult = {
 	continuityId: "continuity:1",
@@ -48,6 +57,13 @@ const seriesJson = {
 		],
 	},
 	backdrop_path: "/backdrop.jpg",
+	content_ratings: {
+		results: [
+			{ iso_3166_1: "DE", rating: "16" },
+			{ iso_3166_1: "US", rating: "TV-MA" },
+			{ iso_3166_1: "GB", rating: "18" },
+		],
+	},
 	created_by: [{ id: 9, name: "Orig Creator" }],
 	episode_run_time: [45, 50],
 	first_air_date: "2020-04-01",
@@ -59,6 +75,7 @@ const seriesJson = {
 	],
 	last_air_date: "2021-06-30",
 	name: "Test Show",
+	networks: [{ name: "HBO" }, { name: "Sky" }],
 	original_name: "テストショー",
 	overview: "A show used for tests.",
 	poster_path: "/poster.jpg",
@@ -72,6 +89,19 @@ const seriesJson = {
 		{ air_date: "2021-04-01", name: "Season 2", season_number: 2 },
 	],
 	status: " Returning Series ",
+	tagline: "What if",
+	translations: {
+		translations: [
+			{
+				data: { name: "Test Show", overview: "A show used for tests." },
+				iso_639_1: "en",
+			},
+			{
+				data: { name: "Testshow", overview: "Eine Testserie." },
+				iso_639_1: "de",
+			},
+		],
+	},
 };
 
 const season1Json = {
@@ -104,6 +134,12 @@ const movieJson = {
 		],
 	},
 	release_date: "2001-05-16",
+	release_dates: {
+		results: [
+			{ iso_3166_1: "FR", release_dates: [{ certification: "12" }] },
+			{ iso_3166_1: "US", release_dates: [{ certification: "PG-13" }] },
+		],
+	},
 	runtime: 121,
 	status: "Released",
 	title: "Test Movie",
@@ -239,32 +275,22 @@ const makeFetch = () =>
 		return responseFor(urlOf(input));
 	});
 
-const makeKv = () => {
-	const store = new Map<string, string>();
-	const puts: { key: string; ttl: number | undefined }[] = [];
-	const kv: MetadataKv = {
-		get: async (key) => {
-			await Promise.resolve();
-			return store.get(key);
-		},
-		put: async (key, value, options) => {
-			await Promise.resolve();
-			store.set(key, value);
-			puts.push({ key, ttl: options?.expirationTtl });
-		},
-	};
-	return { kv, puts, store };
-};
+const makeStore = (): MetadataStore => createMemoryMetadataStore();
+
+const makeProvider = (
+	fetchFn: typeof fetch,
+	store: MetadataStore = makeStore(),
+) =>
+	createTmdbProvider({
+		apiKey: "test-key",
+		fetchFn,
+		resolveStore: () => store,
+	});
 
 describe("tmdb metadata provider", () => {
 	it("normalises a series into WorkMetadata aligned with the engine segments", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(resolved);
 
@@ -276,6 +302,8 @@ describe("tmdb metadata provider", () => {
 		expect(meta.span).toBe("2020–2021");
 		expect(meta.studios).toStrictEqual(["Studio A", "Studio B"]);
 		expect(meta.genres).toStrictEqual(["Drama", "Comedy"]);
+		expect(meta.certification).toBe("TV-MA");
+		expect(meta.networks).toStrictEqual(["HBO", "Sky"]);
 		expect(meta.runtimeMinutes).toBe(45);
 		expect(meta.productionStatus).toBe("Returning Series");
 
@@ -309,37 +337,20 @@ describe("tmdb metadata provider", () => {
 		expect(meta.segments[1]?.episodes).toHaveLength(1);
 	});
 
-	it("snapshots core and volatile fields to KV under distinct TTLs", async () => {
+	it("persists one catalogue document per TMDB title", async () => {
 		const fetchFn = makeFetch();
-		const { kv, puts, store } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const store = makeStore();
+		const provider = makeProvider(fetchFn, store);
 
 		await provider.fetchWork(resolved);
 
-		const coreKey = `tmdb:v2:core:tv:${SERIES_ID}:0:2`;
-		const volatileKey = `tmdb:v2:volatile:tv:${SERIES_ID}:0:2`;
-		expect(store.has(coreKey)).toBe(true);
-		expect(store.has(volatileKey)).toBe(true);
-
-		const coreTtl = puts.find((entry) => entry.key === coreKey)?.ttl;
-		const volatileTtl = puts.find((entry) => entry.key === volatileKey)?.ttl;
-		expect(coreTtl).toBeDefined();
-		expect(volatileTtl).toBeDefined();
-		expect(coreTtl ?? 0).toBeGreaterThan(volatileTtl ?? 0);
+		expect(await store.get("tmdb", `tv:${SERIES_ID}`)).toBeDefined();
+		expect(await store.get("tmdb", `movie:${SERIES_ID}`)).toBeUndefined();
 	});
 
 	it("serves a snapshot hit with zero upstream subrequests", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const first = await provider.fetchWork(resolved);
 		const callsAfterMiss = fetchFn.mock.calls.length;
@@ -352,20 +363,14 @@ describe("tmdb metadata provider", () => {
 
 	it("fetches and normalises movie metadata", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(movieResolved);
 
-		expect(fetchFn).toHaveBeenCalledWith(
-			"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
-		);
+		expect(fetchFn).toHaveBeenCalledWith(movieUrl("999"));
 		expect(meta).toMatchObject({
 			backdropRef: "tmdb:/movie-backdrop.jpg",
+			certification: "PG-13",
 			coverRef: "tmdb:/movie-poster.jpg",
 			genres: ["Action", "Science Fiction"],
 			nativeTitle: "映画",
@@ -402,20 +407,15 @@ describe("tmdb metadata provider", () => {
 
 	it("fetches mixed continuities by contiguous segment kind", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(mixedResolved);
 
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toEqual(
 			expect.arrayContaining([
-				"https://api.themoviedb.org/3/tv/999?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/999/season/1?api_key=test-key",
-				"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
+				tvUrl("999"),
+				seasonUrl("999", 1),
+				movieUrl("999"),
 			]),
 		);
 		expect(meta.title).toBe("Test Show");
@@ -427,39 +427,28 @@ describe("tmdb metadata provider", () => {
 
 	it("isolates movie and TV snapshots with the same numeric ID", async () => {
 		const fetchFn = makeFetch();
-		const { kv, store } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const store = makeStore();
+		const provider = makeProvider(fetchFn, store);
 
 		const movieMeta = await provider.fetchWork(movieResolved);
 		const tvMeta = await provider.fetchWork(resolved);
 
-		expect(store.has("tmdb:v2:core:movie:999")).toBe(true);
-		expect(store.has("tmdb:v2:volatile:movie:999")).toBe(true);
-		expect(store.has("tmdb:v2:core:tv:999:0:2")).toBe(true);
-		expect(store.has("tmdb:v2:volatile:tv:999:0:2")).toBe(true);
+		expect(await store.get("tmdb", "movie:999")).toBeDefined();
+		expect(await store.get("tmdb", "tv:999")).toBeDefined();
 		expect(movieMeta.title).toBe("Test Movie");
 		expect(tvMeta.title).toBe("Test Show");
 		expect(fetchFn).toHaveBeenCalledTimes(4);
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toStrictEqual([
-			"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
-			"https://api.themoviedb.org/3/tv/999?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-			"https://api.themoviedb.org/3/tv/999/season/1?api_key=test-key",
-			"https://api.themoviedb.org/3/tv/999/season/2?api_key=test-key",
+			movieUrl("999"),
+			tvUrl("999"),
+			seasonUrl("999", 1),
+			seasonUrl("999", 2),
 		]);
 	});
 
 	it("fetches movie metadata for an atomic segment in a mixed continuity", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(mixedResolved);
 
@@ -484,30 +473,25 @@ describe("tmdb metadata provider", () => {
 		]);
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toEqual(
 			expect.arrayContaining([
-				"https://api.themoviedb.org/3/tv/999?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/999/season/1?api_key=test-key",
-				"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
+				tvUrl("999"),
+				seasonUrl("999", 1),
+				movieUrl("999"),
 			]),
 		);
 	});
 
 	it("fetches each distinct TV id in its own run", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(multiTvResolved);
 
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toEqual(
 			expect.arrayContaining([
-				"https://api.themoviedb.org/3/tv/999?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/999/season/1?api_key=test-key",
-				"https://api.themoviedb.org/3/tv/200?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/200/season/1?api_key=test-key",
+				tvUrl("999"),
+				seasonUrl("999", 1),
+				tvUrl("200"),
+				seasonUrl("200", 1),
 			]),
 		);
 		expect(meta.segments).toStrictEqual([
@@ -516,14 +500,10 @@ describe("tmdb metadata provider", () => {
 		]);
 	});
 
-	it("keys TV snapshots by series id and segment count", async () => {
+	it("reuses one series document across different continuity slices", async () => {
 		const fetchFn = makeFetch();
-		const { kv, store } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const store = makeStore();
+		const provider = makeProvider(fetchFn, store);
 		const [firstSegment] = resolved.segments;
 		if (firstSegment === undefined) {
 			throw new Error("expected a TV segment fixture");
@@ -537,9 +517,8 @@ describe("tmdb metadata provider", () => {
 		await provider.fetchWork(oneSegmentResolved);
 		await provider.fetchWork(resolved);
 
-		expect(store.has("tmdb:v2:core:tv:999:0:1")).toBe(true);
-		expect(store.has("tmdb:v2:core:tv:999:0:2")).toBe(true);
-		expect(fetchFn).toHaveBeenCalledTimes(5);
+		expect(await store.get("tmdb", "tv:999")).toBeDefined();
+		expect(fetchFn).toHaveBeenCalledTimes(3);
 	});
 
 	const resumedTvResolved: ResolveResult = {
@@ -566,21 +545,16 @@ describe("tmdb metadata provider", () => {
 
 	it("resumes a TV series after an interleaved film at the correct season", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(resumedTvResolved);
 
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toEqual(
 			expect.arrayContaining([
-				"https://api.themoviedb.org/3/tv/999?append_to_response=aggregate_credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/999/season/1?api_key=test-key",
-				"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/tv/999/season/2?api_key=test-key",
+				tvUrl("999"),
+				seasonUrl("999", 1),
+				movieUrl("999"),
+				seasonUrl("999", 2),
 			]),
 		);
 		expect(meta.segments).toHaveLength(3);
@@ -614,12 +588,7 @@ describe("tmdb metadata provider", () => {
 
 	it("keeps segment index alignment when a segment has no tmdb member", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(tmdbLessResolved);
 
@@ -674,12 +643,7 @@ describe("tmdb metadata provider", () => {
 				return responseFor(urlOf(input));
 			},
 		);
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(shortTvResolved);
 
@@ -697,20 +661,13 @@ describe("tmdb metadata provider", () => {
 
 	it("spans years across a multi-movie atomic run", async () => {
 		const fetchFn = makeFetch();
-		const { kv, store } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const store = makeStore();
+		const provider = makeProvider(fetchFn, store);
 
 		const meta = await provider.fetchWork(multiMovieResolved);
 
 		expect(fetchFn.mock.calls.map(([input]) => urlOf(input))).toEqual(
-			expect.arrayContaining([
-				"https://api.themoviedb.org/3/movie/999?append_to_response=credits,recommendations&api_key=test-key",
-				"https://api.themoviedb.org/3/movie/1000?append_to_response=credits,recommendations&api_key=test-key",
-			]),
+			expect.arrayContaining([movieUrl("999"), movieUrl("1000")]),
 		);
 		expect(meta.span).toBe("2001–2003");
 		expect(meta.genres).toStrictEqual([
@@ -724,19 +681,13 @@ describe("tmdb metadata provider", () => {
 			"Test Movie",
 			"Test Movie Two",
 		]);
-		expect(
-			[...store.keys()].some((key) => key.includes("movie:999,1000")),
-		).toBe(true);
+		expect(await store.get("tmdb", "movie:999")).toBeDefined();
+		expect(await store.get("tmdb", "movie:1000")).toBeDefined();
 	});
 
 	it("returns empty metadata when no segment carries a tmdb id", async () => {
 		const fetchFn = makeFetch();
-		const { kv } = makeKv();
-		const provider = createTmdbProvider({
-			apiKey: "test-key",
-			fetchFn,
-			resolveKv: () => kv,
-		});
+		const provider = makeProvider(fetchFn);
 
 		const meta = await provider.fetchWork(noTmdbResolved);
 
@@ -756,5 +707,49 @@ describe("tmdb metadata provider", () => {
 			],
 			title: "",
 		});
+	});
+
+	it("projects a German title and synopsis from stored translations", async () => {
+		const meta = await makeProvider(makeFetch()).fetchWork(resolved, {
+			locale: "de",
+		});
+		expect(meta.title).toBe("Testshow");
+		expect(meta.synopsis).toBe("Eine Testserie.");
+	});
+
+	it("does not recrawl a completed movie the next day", async () => {
+		const fetchFn = makeFetch();
+		const provider = makeProvider(fetchFn);
+		const firstNow = new Date("2026-01-01T00:00:00.000Z");
+		await provider.fetchWork(movieResolved, {
+			now: firstNow,
+			refreshIfDue: true,
+		});
+		const calls = fetchFn.mock.calls.length;
+		await provider.fetchWork(movieResolved, {
+			now: new Date("2026-01-02T00:00:00.000Z"),
+			refreshIfDue: true,
+		});
+		expect(fetchFn.mock.calls.length).toBe(calls);
+	});
+
+	it("recrawls a continuing series after six hours on the work page", async () => {
+		const fetchFn = makeFetch();
+		const provider = makeProvider(fetchFn);
+		const firstNow = new Date("2026-01-01T00:00:00.000Z");
+		await provider.fetchWork(resolved, { now: firstNow, refreshIfDue: true });
+		const calls = fetchFn.mock.calls.length;
+		await provider.fetchWork(resolved, {
+			now: new Date("2026-01-01T06:00:00.000Z"),
+			refreshIfDue: true,
+		});
+		expect(fetchFn.mock.calls.length).toBeGreaterThan(calls);
+		const recrawlUrls = fetchFn.mock.calls
+			.slice(calls)
+			.map(([input]) => urlOf(input));
+		expect(recrawlUrls.some((url) => url.includes("append_to_response"))).toBe(
+			false,
+		);
+		expect(recrawlUrls.some((url) => url.includes("/season/"))).toBe(true);
 	});
 });

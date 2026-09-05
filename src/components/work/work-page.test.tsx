@@ -39,14 +39,19 @@ const work: WorkView = {
 	continuityId: "continuity:spy-x-family",
 	header: {
 		backdropRef: "anidb:16947/backdrop",
+		certification: "TV-14",
 		coverRef: "anidb:16947/cover",
 		genres: ["Comedy", "Action"],
+		lastUpdatedAt: "2026-09-04T12:00:00.000Z",
 		nativeTitle: "SPY×FAMILY",
+		networks: ["TV Tokyo"],
 		productionStatus: "Ended",
 		runtimeMinutes: 24,
 		span: "2022–2023",
 		synopsis: "A spy builds a fake family for a mission.",
+		tagline: undefined,
 		title: "Spy × Family",
+		userRefreshAvailableAt: undefined,
 	},
 	ifYouLiked: [],
 	mediaKind: "anime",
@@ -79,7 +84,9 @@ const sparseWork: WorkView = {
 	...work,
 	header: {
 		...work.header,
+		certification: undefined,
 		genres: [],
+		networks: [],
 		productionStatus: undefined,
 		runtimeMinutes: undefined,
 	},
@@ -111,12 +118,18 @@ describe("WorkPage shell", () => {
 		expect(html).toContain("Comedy · Action");
 		expect(html).toContain("24 min");
 		expect(html).toContain("Ended");
+		expect(html).toContain("TV-14");
+		expect(html).toContain("TV Tokyo");
+		expect(html).toContain("Refresh");
+		expect(html).toContain("Updated");
 	});
 
 	it("omits empty genres, runtime, and production status from the meta line", () => {
 		expect(sparseHtml).not.toContain("Comedy");
 		expect(sparseHtml).not.toContain("24 min");
 		expect(sparseHtml).not.toContain("Ended");
+		expect(sparseHtml).not.toContain("TV-14");
+		expect(sparseHtml).not.toContain("TV Tokyo");
 	});
 
 	it("renders the synopsis and both layout columns", () => {

@@ -27,8 +27,14 @@ const RateableUnitInput = z.discriminatedUnion("kind", [
 
 const WorkGetInput = z.object({
 	continuityId: z.string().min(1),
+	locale: z.string().min(1).default("en"),
 	order: z.enum(presentationOrderSlugs).optional(),
 	proposalId: z.number().int().min(1).optional(),
+});
+
+const RefreshMetadataInput = z.object({
+	continuityId: z.string().min(1),
+	locale: z.string().min(1).default("en"),
 });
 
 const SearchQueryInput = z.object({
@@ -257,14 +263,19 @@ interface SearchHit {
 
 interface WorkHeader {
 	backdropRef: string | undefined;
+	certification: string | undefined;
 	coverRef: string | undefined;
 	genres: string[];
+	lastUpdatedAt: string | undefined;
 	nativeTitle: string | undefined;
+	networks: string[];
 	productionStatus: string | undefined;
 	runtimeMinutes: number | undefined;
 	span: string;
 	synopsis: string;
+	tagline: string | undefined;
 	title: string;
+	userRefreshAvailableAt: string | undefined;
 }
 
 interface EpisodeView {
@@ -422,6 +433,11 @@ interface RatingResult {
 	unit: RateableUnit;
 }
 
+interface RefreshMetadataResult {
+	lastUpdatedAt: string | undefined;
+	userRefreshAvailableAt: string;
+}
+
 export {
 	ApiKeyPlanSchema,
 	CandidateIdInput,
@@ -452,6 +468,7 @@ export {
 	UpdateProviderInput,
 	WatchStatusSchema,
 	WorkGetInput,
+	RefreshMetadataInput,
 };
 export type {
 	AdminIngestStartResult,
@@ -487,5 +504,6 @@ export type {
 	WorkBlock,
 	WorkOpenResult,
 	WorkView,
+	RefreshMetadataResult,
 };
 export type { ResearchTiming } from "@/db/schema";

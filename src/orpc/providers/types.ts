@@ -14,10 +14,14 @@ import type {
 	Similar,
 } from "@/orpc/schema";
 
+import type { MetadataFetchOptions } from "./metadata-freshness.ts";
+import type { LocalizedTitle } from "./metadata-locale.ts";
+
 interface EpisodeMetadata {
 	airDate: string | undefined;
 	number: number;
 	title: string;
+	titles?: readonly LocalizedTitle[];
 }
 
 interface SegmentMetadata {
@@ -31,10 +35,13 @@ interface SegmentMetadata {
 interface WorkMetadata {
 	backdropRef: string | undefined;
 	cast: readonly Credit[];
+	certification?: string | undefined;
 	coverRef: string | undefined;
 	genres: readonly string[];
 	ifYouLiked: readonly Similar[];
+	lastUpdatedAt?: string | undefined;
 	nativeTitle: string | undefined;
+	networks?: readonly string[] | undefined;
 	productionStatus: string | undefined;
 	runtimeMinutes: number | undefined;
 	segments: readonly SegmentMetadata[];
@@ -42,15 +49,17 @@ interface WorkMetadata {
 	staff: readonly Credit[];
 	studios: readonly string[];
 	synopsis: string;
+	tagline?: string | undefined;
 	title: string;
 }
 
-// Display metadata for one media kind. Real impls (#5 TMDB, #6 AniDB) fetch the
-// resolved members from their service and snapshot to KV; segments align
-// index-for-index with the engine's segments. Async because a snapshot miss
-// hits the upstream service.
+// Display metadata for one media kind. Real impls persist TMDB/AniDB snapshots
+// in D1 (ADR-0010); segments align index-for-index with the engine's segments.
 interface MetadataProvider {
-	fetchWork: (resolved: ResolveResult) => Promise<WorkMetadata>;
+	fetchWork: (
+		resolved: ResolveResult,
+		options?: MetadataFetchOptions,
+	) => Promise<WorkMetadata>;
 }
 
 type MetadataRegistry = Readonly<
@@ -117,3 +126,4 @@ export type {
 	ServiceRatingsProvider,
 	WorkMetadata,
 };
+export type { MetadataFetchOptions } from "./metadata-freshness.ts";
